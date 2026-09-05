@@ -16,10 +16,10 @@ const clientEnvSchema = z.object({
    * Obtain from: https://cloud.walletconnect.com
    * Required for RainbowKit wallet modal.
    */
-  NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID: z
+  NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: z
     .string()
-    .min(1, 'NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID is required')
-    .min(16, 'NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID appears to be too short'),
+    .min(1, 'NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID is required')
+    .min(16, 'NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID appears to be too short'),
 
   /**
    * Sepolia RPC URL (Alchemy / Infura / Ankr).
@@ -61,8 +61,8 @@ export type ClientEnv = z.infer<typeof clientEnvSchema>;
 export const clientEnv = new Proxy({} as ClientEnv, {
   get(_target, prop: string) {
     const result = clientEnvSchema.safeParse({
-      NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID:
-        process.env.NEXT_PUBLIC_WALLET_CONNECT_PROJECT_ID,
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID:
+        process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID,
       NEXT_PUBLIC_SEPOLIA_RPC_URL:
         process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL,
       NEXT_PUBLIC_FILE_REGISTRY_ADDRESS:

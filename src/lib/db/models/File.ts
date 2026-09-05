@@ -34,6 +34,17 @@ export interface IFile extends Document {
   /** Auto-managed by Mongoose { timestamps: true } */
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * Set to true after the server verifies the on-chain FileRegistered event
+   * via the PATCH /api/files/[cid] route.
+   * Files with onChainRegistered === false show a "Registration Pending" badge.
+   */
+  onChainRegistered: boolean;
+  /**
+   * The on-chain bytes32 fileId (keccak256 of the CID).
+   * null until registerFile() tx is confirmed and verified server-side.
+   */
+  fileId: string | null;
 }
 
 // ── Schema Definition ─────────────────────────────────────────────────────────
@@ -70,6 +81,15 @@ const FileSchema = new Schema<IFile>(
       required: [true, 'ownerAddress is required'],
       trim: true,
       lowercase: true,
+    },
+    onChainRegistered: {
+      type:    Boolean,
+      default: false,
+    },
+    fileId: {
+      type:    String,
+      default: null,
+      trim:    true,
     },
   },
   {

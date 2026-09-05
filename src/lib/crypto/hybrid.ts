@@ -61,8 +61,13 @@ import 'client-only';
 
 const IDB_DB_NAME    = 'zvault-keys';
 const IDB_STORE_NAME = 'ecdh-private-keys';
-const IDB_KEY_ID     = 'user-static-private-key';
 const ECDH_ALGO      = { name: 'ECDH', namedCurve: 'P-256' } as const;
+
+// ── QA Fix B: Wallet-scoped IDB key names ────────────────────────────────────
+// Keys are namespaced per wallet address so Wallet B can never access
+// Wallet A's private key even on the same device/browser.
+function idbPrivKeyId(address: string)  { return `ecdh-private-key-${address.toLowerCase()}`; }
+function idbPubKeyId(address: string)   { return `ecdh-public-key-${address.toLowerCase()}`; }
 const HASH_ALGO      = 'SHA-256' as const;
 
 // ── IndexedDB Helpers ─────────────────────────────────────────────────────────
@@ -189,35 +194,43 @@ async function deriveAesKwKey(
  *
  * @returns The JWK-encoded P-256 public key as a JSON string.
  */
-export async function generateAndStoreUserKeyPair(): Promise<string> {
-  const db = await openIDB();
+/**
+ * Generates a wallet-scoped static P-256 ECDH keypair for the current user.
+ *
+ * QA Fix B: Keys are stored under IDB keys derived from the wallet address
+ * (e.g. `ecdh-private-key-0xabc...`). Connecting a different wallet surfaces
+ * a completely separate keypair — cross-wallet key access is impossible.
+ *
+ * @param walletAddress  The connected Ethereum address (from wagmi useAccount).
+ * @returns The JWK-encoded P-256 public key as a JSON string.
+ */
+export async function generateAndStoreUserKeyPair(walletAddress: string): Promise<string> {
+  const db      = await openIDB();
+  const privId  = idbPrivKeyId(walletAddress);
+  const pubId   = idbPubKeyId(walletAddress);
 
-  // Check if we already have a stored private key
-  const existing = await idbGet<CryptoKey>(db, IDB_KEY_ID);
+  // Check if we already have a stored keypair for this wallet
+  const existing = await idbGet<CryptoKey>(db, privId);
   if (existing) {
-    // Derive and return the public key from an existing keypair stored in IDB.
-    // Because we only store the private key (non-extractable), we need to
-    // re-export the public key from a paired key stored alongside it.
-    const existingPub = await idbGet<CryptoKey>(db, `${IDB_KEY_ID}-pub`);
+    const existingPub = await idbGet<CryptoKey>(db, pubId);
     if (existingPub) {
       const jwk = await crypto.subtle.exportKey('jwk', existingPub);
       return JSON.stringify(jwk);
     }
   }
 
-  // Generate a new keypair — private key is non-extractable for security.
+  // Generate a fresh keypair — private key is non-extractable for security.
   const keyPair = await crypto.subtle.generateKey(
     ECDH_ALGO,
     false, // extractable: false — private key NEVER leaves the browser
     ['deriveBits'],
   );
 
-  // Store private key in IndexedDB (non-extractable — safe to persist)
-  await idbPut(db, IDB_KEY_ID, keyPair.privateKey);
-  // Store public key separately so we can export/re-export it
-  await idbPut(db, `${IDB_KEY_ID}-pub`, keyPair.publicKey);
+  // Store both halves under wallet-scoped IDB keys
+  await idbPut(db, privId, keyPair.privateKey);
+  await idbPut(db, pubId,  keyPair.publicKey);
 
-  // Export public key as JWK — this is safe to publish
+  // Export public key as JWK — safe to publish to the key registry
   const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
   return JSON.stringify(jwk);
 }
@@ -227,13 +240,18 @@ export async function generateAndStoreUserKeyPair(): Promise<string> {
  * Throws if no key exists — caller must ensure `generateAndStoreUserKeyPair`
  * was called first.
  */
-async function loadPrivateKey(): Promise<CryptoKey> {
+/**
+ * Loads the wallet-scoped ECDH private key from IndexedDB.
+ * Throws if no key exists for this wallet — caller must ensure
+ * `generateAndStoreUserKeyPair(address)` was called first.
+ */
+async function loadPrivateKey(walletAddress: string): Promise<CryptoKey> {
   const db  = await openIDB();
-  const key = await idbGet<CryptoKey>(db, IDB_KEY_ID);
+  const key = await idbGet<CryptoKey>(db, idbPrivKeyId(walletAddress));
   if (!key) {
     throw new Error(
-      'No static ECDH private key found in IndexedDB. ' +
-      'Call generateAndStoreUserKeyPair() first.',
+      `No static ECDH private key found in IndexedDB for wallet ${walletAddress}. ` +
+      'Call generateAndStoreUserKeyPair(address) first.',
     );
   }
   return key;
@@ -334,11 +352,12 @@ export async function wrapKeyForRecipient(
  * @returns The unwrapped AES-256-GCM CryptoKey, ready for decryption.
  */
 export async function unwrapKeyForSelf(
-  wrappedKey:             Uint8Array,
-  ephemeralPublicKeyJwk:  string,
+  wrappedKey:            Uint8Array,
+  ephemeralPublicKeyJwk: string,
+  walletAddress:         string,
 ): Promise<CryptoKey> {
-  // 1. Load the user's static private key from IndexedDB
-  const staticPrivateKey = await loadPrivateKey();
+  // 1. Load the wallet-scoped static private key from IndexedDB (QA Fix B)
+  const staticPrivateKey = await loadPrivateKey(walletAddress);
 
   // 2. Import the sender's ephemeral public key
   const ephPub = await importEcdhPublicKey(ephemeralPublicKeyJwk);

@@ -10,4 +10,5 @@
  */
 import 'client-only';
 
-export { generateAndExportKey, encryptFile, decryptFile } from './core';
+export { generateAndExportKey, encryptFile, decryptFile, decryptFileWithKey } from './core';
+

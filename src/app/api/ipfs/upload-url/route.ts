@@ -20,8 +20,10 @@ export async function GET(): Promise<NextResponse> {
     const pinata = getPinata();
 
     const url = await pinata.upload.public.createSignedURL({
-      expires: 60, // seconds — URL is dead 60s after generation
+      expires:   60,                              // URL expires in 60 seconds (single-use)
+      mimeTypes: ['application/octet-stream'],    // Restrict to encrypted binary blobs only
     });
+
 
     return NextResponse.json({ url }, { status: 200 });
   } catch (err) {

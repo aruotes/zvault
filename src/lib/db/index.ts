@@ -11,3 +11,5 @@ export { default as FileModel } from './models/File';
 export type { IFile } from './models/File';
 export { default as UserModel } from './models/User';
 export type { IUser } from './models/User';
+export { default as SharedAccessModel } from './models/SharedAccess';
+export type { ISharedAccess } from './models/SharedAccess';

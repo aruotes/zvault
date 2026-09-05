@@ -72,20 +72,18 @@ function base64ToUint8Array(base64: string): Uint8Array {
  * The key is imported as non-extractable for operations to minimise
  * the window during which key material is held as a CryptoKey object.
  */
-async function importKey(keyBase64: string): Promise<CryptoKey> {
+async function importKey(keyBase64: string): Promise<{ cryptoKey: CryptoKey; rawBuffer: ArrayBuffer }> {
   const rawKey = base64ToUint8Array(keyBase64);
-  // Copy bytes into a fresh ArrayBuffer to satisfy crypto.subtle.importKey's
-  // BufferSource type constraint — rawKey.buffer is typed as ArrayBufferLike
-  // (ArrayBuffer | SharedArrayBuffer) in the newer TypeScript DOM lib.
   const rawBuffer = new ArrayBuffer(rawKey.byteLength);
   new Uint8Array(rawBuffer).set(rawKey);
-  return crypto.subtle.importKey(
+  const cryptoKey = await crypto.subtle.importKey(
     'raw',
     rawBuffer,
     { name: ALGORITHM, length: KEY_LENGTH },
     false, // non-extractable once imported for use
     ['encrypt', 'decrypt'],
   );
+  return { cryptoKey, rawBuffer };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -132,19 +130,16 @@ export async function encryptFile(
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH_BYTES));
 
   // 3. Import the key and encrypt
-  const cryptoKey = await importKey(keyBase64);
+  const { cryptoKey } = await importKey(keyBase64);
   const ciphertext = await crypto.subtle.encrypt(
     { name: ALGORITHM, iv: iv as Uint8Array<ArrayBuffer> },
     cryptoKey,
     plaintext,
   );
 
-  // 4. Prepend the IV to the ciphertext:  [ IV (12 B) | ciphertext (N B) ]
-  const combined = new Uint8Array(IV_LENGTH_BYTES + ciphertext.byteLength);
-  combined.set(iv, 0);
-  combined.set(new Uint8Array(ciphertext), IV_LENGTH_BYTES);
-
-  return new Blob([combined], { type: 'application/octet-stream' });
+  // 4. Prepend the IV to the ciphertext using the Blob constructor
+  // [ IV (12 B) | ciphertext (N B) ]
+  return new Blob([iv, ciphertext], { type: 'application/octet-stream' });
 }
 
 /**
@@ -181,7 +176,11 @@ export async function decryptFile(
   const ciphertext = combined.slice(IV_LENGTH_BYTES);
 
   // 3. Import the key and decrypt
-  const cryptoKey = await importKey(keyBase64);
+  const { cryptoKey, rawBuffer: importedKeyBuffer } = await importKey(keyBase64);
+
+  console.log('[ZVault Decrypt] Key byte length:', importedKeyBuffer.byteLength);
+  console.log('[ZVault Decrypt] IV byte length:', iv.byteLength);
+  console.log('[ZVault Decrypt] Ciphertext + Tag length:', ciphertext.byteLength);
 
   let plaintext: ArrayBuffer;
   try {
@@ -191,9 +190,13 @@ export async function decryptFile(
       ciphertext,
     );
   } catch (err) {
-    // Web Crypto throws DOMException with name 'OperationError' for wrong key / tampered ciphertext
     const isOperationError =
       err instanceof DOMException && err.name === 'OperationError';
+    
+    if (isOperationError) {
+      console.error('[ZVault Decrypt] Auth tag verification failed. Diagnostic: Key or file mismatch. IV length:', iv.byteLength, 'Ciphertext length:', ciphertext.byteLength);
+    }
+
     throw new Error(
       isOperationError
         ? 'Decryption failed: incorrect key or corrupted file. Please use the exact key that was generated for this file.'
@@ -203,3 +206,53 @@ export async function decryptFile(
 
   return new Blob([plaintext], { type: mimeType });
 }
+
+/**
+ * Decrypts an encrypted Blob using an already-imported AES-256-GCM CryptoKey.
+ *
+ * This is the shared-access decryption path: the caller holds a CryptoKey
+ * that was unwrapped from the ECDH key-agreement (via `unwrapKeyForSelf`),
+ * so it cannot be exported back to Base64 without re-marking as extractable.
+ * We therefore call `crypto.subtle.decrypt` directly with the key object.
+ *
+ * IV layout is identical to `decryptFile` — first 12 bytes of the Blob.
+ *
+ * @param encryptedBlob - The Blob containing [IV ‖ ciphertext].
+ * @param cryptoKey     - The non-extractable AES-256-GCM CryptoKey.
+ * @param mimeType      - MIME type to apply to the returned plaintext Blob.
+ * @returns             - A Blob of the original plaintext.
+ */
+export async function decryptFileWithKey(
+  encryptedBlob: Blob,
+  cryptoKey: CryptoKey,
+  mimeType = 'application/octet-stream',
+): Promise<Blob> {
+  const combined = await encryptedBlob.arrayBuffer();
+
+  if (combined.byteLength <= IV_LENGTH_BYTES) {
+    throw new Error('Invalid encrypted file: too short to contain a valid IV.');
+  }
+
+  const iv         = combined.slice(0, IV_LENGTH_BYTES);
+  const ciphertext = combined.slice(IV_LENGTH_BYTES);
+
+  let plaintext: ArrayBuffer;
+  try {
+    plaintext = await crypto.subtle.decrypt(
+      { name: ALGORITHM, iv: new Uint8Array(iv) },
+      cryptoKey,
+      ciphertext,
+    );
+  } catch (err) {
+    const isOperationError =
+      err instanceof DOMException && err.name === 'OperationError';
+    throw new Error(
+      isOperationError
+        ? 'Decryption failed: incorrect key or corrupted file.'
+        : `Decryption failed unexpectedly: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  return new Blob([plaintext], { type: mimeType });
+}
+
