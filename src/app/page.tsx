@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  useState, useRef, useEffect, useReducer, useCallback,
+  useState, useRef, useEffect, useReducer, useCallback, startTransition,
 } from 'react';
 import { encryptFile, decryptFile, generateAndExportKey } from '@/lib/crypto/core';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
@@ -12,6 +12,7 @@ import { ConnectPromptOverlay } from '@/components/features/ConnectPromptOverlay
 import { ShareModal }           from '@/components/features/ShareModal';
 import { SharedWithMePane }     from '@/components/features/SharedWithMePane';
 import { SEPOLIA_CHAIN_ID }     from '@/lib/web3/contracts';
+import { KeyOnboardingGateway } from '@/components/features/KeyOnboardingGateway';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -164,11 +165,14 @@ function UploadProgress({ progress, statusText, isError }: UploadProgressProps) 
 }
 
 // ── Key Onboarding Banner ─────────────────────────────────────────────────────
+// Shown during the 'generating' / 'syncing' states for RETURNING users
+// (new users see the full KeyOnboardingGateway instead).
 
 function KeyOnboardingBanner() {
   const { status, error, retry } = useKeyOnboarding();
 
-  if (status === 'idle' || status === 'ready') return null;
+  // States handled elsewhere (gateway or no-op)
+  if (status === 'idle' || status === 'checking' || status === 'needs-onboarding' || status === 'ready') return null;
 
   if (status === 'error') {
     return (
@@ -523,11 +527,13 @@ function VaultList({ refreshTrigger }: VaultListProps) {
     let cancelled = false;
 
     if (!isConnected || !address) {
-      dispatch({ type: 'SUCCESS', files: [] });
-      setDecryptCid(null);
-      setDecryptStatus(null);
-      setDownloading(null);
-      setShareTarget(null);
+      startTransition(() => {
+        dispatch({ type: 'SUCCESS', files: [] });
+        setDecryptCid(null);
+        setDecryptStatus(null);
+        setDownloading(null);
+        setShareTarget(null);
+      });
       return;
     }
 
@@ -754,9 +760,19 @@ function VaultList({ refreshTrigger }: VaultListProps) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
-  const { isConnected }    = useAccount();
+  const { isConnected }   = useAccount();
+  const { status: keyStatus } = useKeyOnboarding();
   const [vaultRefresh,  setVaultRefresh]  = useState(0);
   const [activeTab,     setActiveTab]     = useState<'encrypt' | 'decrypt' | 'shared'>('encrypt');
+
+  // Show the gateway for ALL connected states except 'ready'.
+  // This includes: checking, needs-onboarding, generating, syncing, error.
+  // The KeyOnboardingGateway component handles its own error/retry UI.
+  const showGateway = isConnected && keyStatus !== 'ready';
+
+  // Vault is ONLY in the DOM when: (a) disconnected (public landing), or (b) keys confirmed ready.
+  // Any other connected state keeps the vault strictly out of the React tree.
+  const showVault = !isConnected || keyStatus === 'ready';
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
@@ -814,7 +830,15 @@ export default function HomePage() {
         <NetworkGateBanner />
       </section>
 
-      {/* ── Main Grid ── */}
+      {/* ── Gatekeeper: blocks vault for new users until keys are ready ── */}
+      {showGateway && (
+        <section className="max-w-6xl mx-auto px-6 pb-20 flex">
+          <KeyOnboardingGateway />
+        </section>
+      )}
+
+      {/* ── Main Grid (only renders when keys are confirmed) ── */}
+      {showVault && (
       <section className="max-w-6xl mx-auto px-6 pb-20">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -886,6 +910,7 @@ export default function HomePage() {
           </p>
         </div>
       </section>
+      )}
 
       {/* ── Footer ── */}
       <footer className="border-t border-slate-200 py-8 bg-white mt-auto">

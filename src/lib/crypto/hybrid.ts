@@ -236,6 +236,21 @@ export async function generateAndStoreUserKeyPair(walletAddress: string): Promis
 }
 
 /**
+ * Returns true if a wallet-scoped ECDH keypair already exists in IndexedDB.
+ * Does NOT generate or modify anything — purely a read-only check.
+ * Used by useKeyOnboarding to distinguish returning users from new ones.
+ */
+export async function hasLocalKey(walletAddress: string): Promise<boolean> {
+  try {
+    const db  = await openIDB();
+    const key = await idbGet<CryptoKey>(db, idbPrivKeyId(walletAddress));
+    return key !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Retrieves the static private key from IndexedDB.
  * Throws if no key exists — caller must ensure `generateAndStoreUserKeyPair`
  * was called first.

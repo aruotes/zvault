@@ -101,16 +101,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await connectToDatabase();
 
-    // Upsert: create if new, update publicKey if wallet address already exists.
-    // This handles key rotation (e.g. user clears IndexedDB and re-registers).
-    const user = await UserModel.findOneAndUpdate(
+    // Upsert: create or update publicKey for this wallet address.
+    // 'new: true' is the correct Mongoose option to return the updated document.
+    // (returnDocument:'after' is a raw MongoDB driver option — Mongoose ignores it.)
+    await UserModel.findOneAndUpdate(
       { walletAddress },
-      { walletAddress, publicKey },
+      { $set: { walletAddress, publicKey } },
       { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
     );
 
     return NextResponse.json(
-      { walletAddress: user.walletAddress },
+      { walletAddress },
       { status: 200 },
     );
   } catch (err) {
