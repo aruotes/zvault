@@ -30,6 +30,7 @@ import {
 export type GrantAccessStatus =
   | 'idle'
   | 'fetching-key'
+  | 'recipient-not-found'   // Key is missing — invite the recipient
   | 'wrapping'
   | 'awaiting-wallet'
   | 'confirming'
@@ -73,11 +74,11 @@ export function useGrantAccess(): UseGrantAccessReturn {
     setStatus('fetching-key');
     const recipientPubKey = await fetchRecipientPublicKey(recipientAddress);
     if (!recipientPubKey) {
-      const msg = `Recipient ${recipientAddress} has not registered their encryption key. ` +
-                  'Ask them to connect their wallet to ZVault first.';
-      setError(msg);
-      setStatus('error');
-      throw new Error(msg);
+      // Surface as a dedicated non-error status so the modal can render
+      // the friendly "invite" UI instead of a red error banner.
+      setStatus('recipient-not-found');
+      setError(null); // no error — this is an expected edge case
+      throw new Error('RECIPIENT_NOT_FOUND');
     }
 
     // Step 2 — Import AES key as extractable CryptoKey for wrapping

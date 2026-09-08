@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  useState, useRef, useEffect, useReducer, useCallback,
+  useState, useRef, useEffect, useReducer, useCallback, startTransition,
 } from 'react';
 import { encryptFile, decryptFile, generateAndExportKey } from '@/lib/crypto/core';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
@@ -523,11 +523,13 @@ function VaultList({ refreshTrigger }: VaultListProps) {
     let cancelled = false;
 
     if (!isConnected || !address) {
-      dispatch({ type: 'SUCCESS', files: [] });
-      setDecryptCid(null);
-      setDecryptStatus(null);
-      setDownloading(null);
-      setShareTarget(null);
+      startTransition(() => {
+        dispatch({ type: 'SUCCESS', files: [] });
+        setDecryptCid(null);
+        setDecryptStatus(null);
+        setDownloading(null);
+        setShareTarget(null);
+      });
       return;
     }
 

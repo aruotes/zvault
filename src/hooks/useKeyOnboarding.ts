@@ -15,7 +15,7 @@
  *   'ready'      → keypair confirmed in IDB + public key synced
  *   'error'      → any step failed (user can retry)
  */
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, startTransition } from 'react';
 import { useAccount } from 'wagmi';
 import {
   generateAndStoreUserKeyPair,
@@ -45,7 +45,7 @@ export function useKeyOnboarding(): UseKeyOnboardingReturn {
 
   useEffect(() => {
     if (!isConnected || !address) {
-      setStatus('idle');
+      startTransition(() => setStatus('idle'));
       return;
     }
     // Already onboarded for this address in this session → stay 'ready'.

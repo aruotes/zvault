@@ -29,13 +29,14 @@ interface ShareModalProps {
 // ── Status badge helpers ──────────────────────────────────────────────────────
 
 const STATUS_LABELS: Record<GrantAccessStatus, string> = {
-  idle:             '',
-  'fetching-key':   'Fetching recipient\'s public key…',
-  wrapping:         'Wrapping AES key with ECIES…',
-  'awaiting-wallet':'Awaiting wallet signature…',
-  confirming:       'Waiting for on-chain confirmation…',
-  done:             'Access granted ✓',
-  error:            'An error occurred.',
+  idle:                   '',
+  'fetching-key':         'Fetching recipient\'s public key…',
+  'recipient-not-found':  '',   // handled by the invite card below
+  wrapping:               'Wrapping AES key with ECIES…',
+  'awaiting-wallet':      'Awaiting wallet signature…',
+  confirming:             'Waiting for on-chain confirmation…',
+  done:                   'Access granted ✓',
+  error:                  'An error occurred.',
 };
 
 const STATUS_COLORS: Partial<Record<GrantAccessStatus, string>> = {
@@ -54,10 +55,14 @@ export function ShareModal({ isOpen, onClose, fileName, fileId, keyBase64: initi
   const [recipientAddr, setRecipientAddr] = useState('');
   const [resolvedKey,   setResolvedKey]   = useState<string | undefined>(initialKey);
   const [keyDropError,  setKeyDropError]  = useState<string | null>(null);
+  const [inviteCopied,  setInviteCopied]  = useState(false);
   const keyInputRef = useRef<HTMLInputElement>(null);
 
-  const isWrongNetwork = chainId !== SEPOLIA_CHAIN_ID;
-  const isBusy = status !== 'idle' && status !== 'done' && status !== 'error';
+  const isWrongNetwork       = chainId !== SEPOLIA_CHAIN_ID;
+  // Extract before isBusy so TypeScript control-flow doesn't narrow
+  // status to 'idle|done|error' at the point of the disabled check.
+  const isRecipientNotFound  = status === 'recipient-not-found';
+  const isBusy = status !== 'idle' && status !== 'done' && status !== 'error' && !isRecipientNotFound;
 
   const handleKeyFile = useCallback(async (file: File) => {
     try {
@@ -77,15 +82,30 @@ export function ShareModal({ isOpen, onClose, fileName, fileId, keyBase64: initi
     if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) return;
     try {
       await grantAccess({ fileId, recipientAddress: addr, keyBase64: resolvedKey });
-    } catch {
-      // error is surfaced via hook state
+    } catch (err) {
+      // 'RECIPIENT_NOT_FOUND' is surfaced via hook status — not a crash.
+      // All other errors are surfaced via hook's 'error' status.
+      if (err instanceof Error && err.message !== 'RECIPIENT_NOT_FOUND') {
+        console.error('[ZVault] grantAccess unexpected error:', err);
+      }
     }
   }, [resolvedKey, address, recipientAddr, fileId, grantAccess]);
+
+  const handleCopyInvite = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.origin);
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    } catch {
+      // clipboard API blocked in some browser contexts
+    }
+  }, []);
 
   const handleClose = useCallback(() => {
     reset();
     setRecipientAddr('');
     setKeyDropError(null);
+    setInviteCopied(false);
     onClose();
   }, [reset, onClose]);
 
@@ -182,8 +202,34 @@ export function ShareModal({ isOpen, onClose, fileName, fileId, keyBase64: initi
           />
         </div>
 
-        {/* Progress display */}
-        {status !== 'idle' && (
+        {/* ── Recipient-not-found: Invite card (replaces red error) ── */}
+        {isRecipientNotFound && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-950/30 px-4 py-3.5 space-y-3">
+            <div className="flex items-start gap-2">
+              <span className="text-amber-400 text-base leading-none mt-0.5">⚠</span>
+              <p className="text-amber-200 text-xs leading-relaxed">
+                <strong className="font-semibold">Wallet not yet registered on ZVault.</strong>{' '}
+                This wallet hasn&apos;t registered on ZVault yet. To enable end-to-end
+                encryption, they need to connect their wallet once.
+              </p>
+            </div>
+            <button
+              id="share-modal-copy-invite-btn"
+              onClick={handleCopyInvite}
+              className="
+                w-full py-2 rounded-lg text-xs font-semibold
+                bg-amber-500/15 border border-amber-500/25
+                text-amber-300 hover:bg-amber-500/25
+                transition-colors duration-150
+              "
+            >
+              {inviteCopied ? '✓ Copied!' : '🔗 Copy Invite Link'}
+            </button>
+          </div>
+        )}
+
+        {/* Progress display — all statuses except recipient-not-found (handled above) */}
+        {status !== 'idle' && !isRecipientNotFound && (
           <div className={`rounded-lg border px-3 py-2.5 text-xs font-medium
             ${STATUS_COLORS[status] ?? 'text-indigo-300 bg-indigo-950/60 border-indigo-500/30'}`}>
             {STATUS_LABELS[status]}
@@ -225,6 +271,7 @@ export function ShareModal({ isOpen, onClose, fileName, fileId, keyBase64: initi
                 onClick={handleShare}
                 disabled={
                   isBusy ||
+                  isRecipientNotFound ||  // key missing — cannot share
                   isWrongNetwork ||
                   !resolvedKey ||
                   !/^0x[0-9a-fA-F]{40}$/.test(recipientAddr.trim()) ||

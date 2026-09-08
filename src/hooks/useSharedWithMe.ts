@@ -9,7 +9,7 @@
  * QA Fix E: Uses DEPLOYMENT_BLOCK as fromBlock to avoid scanning all Sepolia
  * history, preventing RPC timeouts.
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, startTransition } from 'react';
 import { useAccount, usePublicClient }       from 'wagmi';
 import { decodeEventLog }                    from 'viem';
 import {
@@ -65,7 +65,7 @@ export function useSharedWithMe(): UseSharedWithMeReturn {
 
   useEffect(() => {
     if (!isConnected || !address || !publicClient) {
-      setSharedFiles([]);
+      startTransition(() => setSharedFiles([]));
       return;
     }
 

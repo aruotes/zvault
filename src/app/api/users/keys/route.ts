@@ -106,7 +106,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const user = await UserModel.findOneAndUpdate(
       { walletAddress },
       { walletAddress, publicKey },
-      { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true },
+      { upsert: true, returnDocument: 'after', runValidators: true, setDefaultsOnInsert: true },
     );
 
     return NextResponse.json(
